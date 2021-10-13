@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <bson.h>
 #include <uvw.hpp>
+#include <easy/profiler.h>
 
 #include "draconity.h"
 #include "abstract_platform.h"
@@ -57,6 +58,7 @@ Draconity::Draconity() {
         this->timeout_incomplete = config->get_as<int>     ("timeout_incomplete").value_or(500);
         this->prevent_wake       = config->get_as<bool>    ("prevent_wake"      ).value_or(false);
     }
+    profiler::startListen();
     printf("[+] draconity: loaded config from %s\n", config_path.c_str());
 }
 
@@ -69,6 +71,7 @@ void Draconity::init_pause_timer() {
 }
 
 std::string Draconity::set_dragon_enabled(bool enabled) {
+    EASY_FUNCTION();
     std::stringstream errstream;
     std::string errmsg;
     this->dragon_lock.lock();
@@ -96,6 +99,7 @@ std::string Draconity::set_dragon_enabled(bool enabled) {
 }
 
 std::shared_ptr<Grammar> Draconity::get_grammar(uintptr_t key) {
+    EASY_FUNCTION();
     for (auto &grammar_pair : this->grammars) {
         // Grammar keys correspond to the grammar's position in memory,
         // underneath the shared_ptr.
@@ -108,6 +112,7 @@ std::shared_ptr<Grammar> Draconity::get_grammar(uintptr_t key) {
 }
 
 int unload_grammar(std::shared_ptr<Grammar> &grammar) {
+    EASY_FUNCTION();
     int rc;
     // Unregister callbacks before unloading.
     if ((rc =_DSXGrammar_Unregister(grammar->handle, grammar->endkey))) {
@@ -133,14 +138,17 @@ int unload_grammar(std::shared_ptr<Grammar> &grammar) {
 }
 
 int load_grammar(std::shared_ptr<Grammar> &grammar, std::vector<uint8_t> &blob) {
+    EASY_FUNCTION();
     int rc;
     void *grammar_key = (void *)grammar.get();
     dsx_dataptr blob_dp = {.data = blob.data(),
                            .size = (uint32_t)blob.size()};
+    EASY_BLOCK("Dragon");
     if ((rc = _DSXEngine_LoadGrammar(_engine, 1 /* cfg */, &blob_dp, &grammar->handle))) {
         grammar->record_error("grammar", "error loading grammar", rc, grammar->name);
         return rc;
     }
+    EASY_END_BLOCK;
     grammar->state.blob = std::move(blob);
 
     // Now register callbacks
@@ -161,6 +169,7 @@ int load_grammar(std::shared_ptr<Grammar> &grammar, std::vector<uint8_t> &blob) 
 }
 
 void activate_rule(std::shared_ptr<Grammar> &grammar, std::string &rule) {
+    EASY_FUNCTION();
     int rc = _DSXGrammar_Activate(grammar->handle, 0, false, rule.c_str());
     if (rc) {
         grammar->record_error("rule", "error activating rule", rc, rule);
@@ -170,6 +179,7 @@ void activate_rule(std::shared_ptr<Grammar> &grammar, std::string &rule) {
 }
 
 void deactivate_rule(std::shared_ptr<Grammar> &grammar, std::string &rule) {
+    EASY_FUNCTION();
     int rc = _DSXGrammar_Deactivate(grammar->handle, 0, rule.c_str());
     if (rc) {
         grammar->record_error("rule", "error deactivating rule", rc, rule);
@@ -179,6 +189,7 @@ void deactivate_rule(std::shared_ptr<Grammar> &grammar, std::string &rule) {
 }
 
 void sync_rules(std::shared_ptr<Grammar> &grammar, GrammarState &shadow_state) {
+    EASY_FUNCTION();
     std::set<std::string> rules_to_enable = {};
     std::set<std::string> rules_to_disable = {};
 
@@ -202,11 +213,16 @@ void sync_rules(std::shared_ptr<Grammar> &grammar, GrammarState &shadow_state) {
 }
 
 void set_list(std::shared_ptr<Grammar> &grammar, const std::string &name, std::set<std::string> &list) {
+    EASY_FUNCTION();
+    std::string block_name = "set_list: ";
+    block_name += name;
+    EASY_BLOCK(block_name);
     // List has to be passed as a dsx_dataptr - we need to construct one.
     dsx_dataptr dataptr = {.data = NULL, .size = 0};
 
     // Establish the dataptr's size first.
     for (auto &word : list) {
+        EASY_BLOCK("length");
         int length = strlen(word.c_str());
         dataptr.size += sizeof(dsx_id) + align4(length);
     }
@@ -215,6 +231,7 @@ void set_list(std::shared_ptr<Grammar> &grammar, const std::string &name, std::s
     dataptr.data = calloc(1, dataptr.size);
     uint8_t *pos = (uint8_t *)dataptr.data;
     for (auto word : list) {
+        EASY_BLOCK("alloc");
         dsx_id *ent = (dsx_id *)pos;
         const char *word_cstr = word.c_str();
         uint32_t length = strlen(word_cstr);
@@ -224,7 +241,9 @@ void set_list(std::shared_ptr<Grammar> &grammar, const std::string &name, std::s
     }
 
     // Now we can pass the list to Dragon.
+    EASY_BLOCK("Dragon");
     int rc = _DSXGrammar_SetList(grammar->handle, name.c_str(), &dataptr);
+    EASY_END_BLOCK;
     if (rc) {
         grammar->record_error("list", "error setting list", rc, name);
         return;
@@ -234,12 +253,34 @@ void set_list(std::shared_ptr<Grammar> &grammar, const std::string &name, std::s
 }
 
 void sync_lists(std::shared_ptr<Grammar> &grammar, GrammarState &shadow_state) {
+    EASY_FUNCTION();
     for (auto &list_pair : shadow_state.lists) {
-        set_list(grammar, list_pair.first, list_pair.second);
+        if (grammar->state.lists[list_pair.first] != list_pair.second) {
+            // const std::set<std::string> &old = grammar->state.lists[list_pair.first];
+            // const std::set<std::string> &cur = list_pair.second;
+            // std::set<std::string> added = {};
+            // std::set<std::string> removed = {};
+            // std::set_difference(cur.begin(), cur.end(),
+            //                     old.begin(), old.end(),
+            //                     std::inserter(added, added.end()));
+            // std::set_difference(old.begin(), old.end(),
+            //                     cur.begin(), cur.end(),
+            //                     std::inserter(removed, removed.end()));
+            // printf("added to %s\n", list_pair.first.c_str());
+            // for (const std::string &e : added) {
+            //     std::cout << e << std::endl;
+            // }
+            // printf("removed from %s\n", list_pair.first.c_str());
+            // for (const std::string &e : removed) {
+            //     std::cout << e << std::endl;
+            // }
+            set_list(grammar, list_pair.first, list_pair.second);
+        }
     }
 }
 
 void sync_grammar(std::shared_ptr<Grammar> &grammar, GrammarState &shadow_state) {
+    EASY_FUNCTION();
     // This is where we'll accumulate errors to send to the client if things go
     // wrong - start with clean slate.
     grammar->errors.clear();
@@ -335,6 +376,7 @@ void Draconity::clear_client_state(uint64_t client_id) {
 
 /* Unload & erase a live grammar. */
 void Draconity::remove_grammar(std::string name, std::shared_ptr<Grammar> &grammar) {
+    EASY_FUNCTION();
     if (grammar->enabled) {
         unload_grammar(grammar);
     }
@@ -342,6 +384,7 @@ void Draconity::remove_grammar(std::string name, std::shared_ptr<Grammar> &gramm
 }
 
 void Draconity::sync_grammars() {
+    EASY_FUNCTION();
     for (auto &pair : this->shadow_grammars) {
         std::string name = pair.first;
         auto &shadow_state = pair.second;
@@ -399,6 +442,7 @@ void record_word_error(std::string &word, std::string error_message,
 
 int add_word(std::string word, std::set<std::string> &loaded_words,
              std::list<std::unordered_map<std::string, std::string>> &errors) {
+    EASY_FUNCTION();
     std::stringstream errstream;
     int rc;
 
@@ -429,6 +473,7 @@ int add_word(std::string word, std::set<std::string> &loaded_words,
 
 int remove_word(std::string word, std::set<std::string> &loaded_words,
                 std::list<std::unordered_map<std::string, std::string>> &errors) {
+    EASY_FUNCTION();
     int rc = _DSXEngine_DeleteWord(_engine, 1, word.c_str());
     if (rc) {
         std::stringstream errstream;
@@ -442,6 +487,7 @@ int remove_word(std::string word, std::set<std::string> &loaded_words,
 }
 
 void Draconity::set_words(std::set<std::string> &new_words, std::list<std::unordered_map<std::string, std::string>> &errors) {
+    EASY_FUNCTION();
     std::set<std::string> words_to_add = {};
     std::set<std::string> words_to_remove = {};
 
@@ -507,6 +553,7 @@ void Draconity::handle_word_failures(std::list<std::unordered_map<std::string, s
 }
 
 void Draconity::sync_words() {
+    EASY_FUNCTION();
     // Errors will be accumulated in this list per-word. Later, we'll work out
     // which clients map to which error.
     std::list<std::unordered_map<std::string, std::string>> errors;
@@ -525,6 +572,7 @@ void Draconity::sync_words() {
 
 /* Push the shadow state into Dragon - make it live. */
 void Draconity::sync_state() {
+    EASY_FUNCTION();
     this->shadow_lock.lock();
     this->sync_words();
     this->sync_grammars();
@@ -563,6 +611,7 @@ void Draconity::set_shadow_words(uint64_t client_id, uint32_t tid, std::set<std:
 
 // Must be run on the Uv thread
 void Draconity::do_unpause() {
+    EASY_FUNCTION();
     if (this->pause_token > 0 ) {
         this->pause_clients.clear();
         this->pause_timer->stop();
@@ -584,6 +633,7 @@ void Draconity::client_unpause(uint64_t client_id, uint64_t token) {
 void Draconity::handle_pause(uint64_t token) {
     // We run the entire pause process on the Uv thread to avoid contention.
     server->invoke([this, token] {
+        EASY_BLOCK("handle_pause inner");
         this->pause_token = token;
         this->sync_state();
         if (server->clients.empty()) {

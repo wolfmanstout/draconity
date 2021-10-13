@@ -34,5 +34,10 @@ cmake . -DZYDIS_BUILD_EXAMPLES=NO -DZYDIS_BUILD_TOOLS=NO -DCMAKE_INSTALL_PREFIX=
 make -j4 && make install
 
 cd "$base"
+cd "easy_profiler-2.1.0/easy_profiler-2.1.0"
+cmake . -DEASY_PROFILER_NO_GUI=YES -DEASY_OPTION_LOG=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX="$PREFIX"
+make -j4 && make install
+
+cd "$base"
 cmake . -DCMAKE_INSTALL_PREFIX="$PREFIX"
 make -j4

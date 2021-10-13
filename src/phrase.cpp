@@ -1,4 +1,5 @@
 #include <bson.h>
+#include <easy/profiler.h>
 #include "draconity.h"
 #include "phrase.h"
 #include "server.h"
@@ -64,6 +65,7 @@ static void result_to_bson(bson_t *obj, dsx_result *result) {
 }
 
 void phrase_publish(void *key, char *phrase, dsx_result *result, const char *cmd, bool use_result, bool send_wav) {
+    EASY_FUNCTION();
     bson_t obj = BSON_INITIALIZER;
     std::shared_ptr<Grammar> grammar = draconity->get_grammar((uintptr_t)key);
     if (grammar == NULL) return;
@@ -88,6 +90,7 @@ void phrase_publish(void *key, char *phrase, dsx_result *result, const char *cmd
 }
 
 int phrase_end(void *key, dsx_end_phrase *endphrase) {
+    EASY_FUNCTION();
     bool accept = (endphrase->flags & 1) == 1;
     bool ours = (endphrase->flags & 2) == 2;
 
@@ -97,12 +100,14 @@ int phrase_end(void *key, dsx_end_phrase *endphrase) {
 }
 
 int phrase_hypothesis(void *key, dsx_hypothesis *hypothesis) {
+    EASY_FUNCTION();
     phrase_publish(key, hypothesis->phrase, hypothesis->result, "p.hypothesis", true, false);
     _DSXResult_Destroy(hypothesis->result);
     return 0;
 }
 
 int phrase_begin(void *key, void *data) {
+    EASY_FUNCTION();
     std::shared_ptr<Grammar> grammar = draconity->get_grammar((uintptr_t)key);
     if (grammar == NULL) return 0;
     draconity_send("phrase",
