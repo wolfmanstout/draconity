@@ -42,6 +42,10 @@ std::vector<uint8_t> prep_response(const char *topic, bson_t *obj) {
 
 /* Publish a message to all clients */
 void draconity_publish(const char *topic, bson_t *obj) {
+    size_t length;
+    char *readable = bson_as_relaxed_extended_json(obj, &length);
+    printf("draconity_publish: %s\n", readable);
+    bson_free(readable);
     auto response = prep_response(topic, obj);
     if (!response.empty()) {
         draconity_transport_publish(std::move(response));
@@ -50,6 +54,10 @@ void draconity_publish(const char *topic, bson_t *obj) {
 
 /* Publish a message to a single client */
 void draconity_send(const char *topic, bson_t *obj, uint32_t tid, uint64_t client_id) {
+    size_t length;
+    char *readable = bson_as_relaxed_extended_json(obj, &length);
+    printf("draconity_send: %s\n", readable);
+    bson_free(readable);
     auto response = prep_response(topic, obj);
     if (!response.empty()) {
         draconity_transport_send(std::move(response), tid, client_id);
@@ -114,6 +122,7 @@ static bson_t *handle_message(uint64_t client_id, uint32_t tid, const std::vecto
 
     const uint8_t *data_buf = NULL, *phrase_buf = NULL, *words_buf, *active_rules_buf = NULL, *lists_buf = NULL;
     uint32_t data_len = 0, phrase_len = 0, words_len, active_rules_len = 0, lists_len = 0;
+    char *readable = NULL;
 
     bson_t *resp = NULL;
     bson_t root;
@@ -121,6 +130,10 @@ static bson_t *handle_message(uint64_t client_id, uint32_t tid, const std::vecto
         errmsg = "bson init error";
         goto end;
     }
+    size_t length;
+    readable = bson_as_relaxed_extended_json(&root, &length);
+    printf("handle_message: %s\n", readable);
+    bson_free(readable);
     bson_iter_t iter;
     if (bson_iter_init(&iter, &root)) {
         while (bson_iter_next(&iter)) {
